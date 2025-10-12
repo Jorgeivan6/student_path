@@ -42,14 +42,13 @@ jobs:
             echo "✅ version.php válido (Moodle >= 4.0)\n";
           '
 
-      # 4️⃣ Instalar Moodle Coding Standards (desde ZIP, rama main)
+      # 4️⃣ Instalar Moodle Coding Standards (via Composer)
       - name: Install Moodle coding standards (PHP CodeSniffer)
         run: |
-          echo "📦 Descargando moodlehq/moodle-codesniffer ZIP (rama main)..."
-          curl -L https://github.com/moodlehq/moodle-codesniffer/archive/refs/heads/main.zip -o /tmp/moodle-codesniffer.zip
-          echo "📂 Descomprimiendo..."
-          unzip -q /tmp/moodle-codesniffer.zip -d /tmp/ || (echo "❌ Error: No se pudo descomprimir el ZIP"; exit 1)
-          phpcs --config-set installed_paths /tmp/moodle-codesniffer-main
+          echo "📦 Instalando MoodleHQ CodeSniffer desde Composer..."
+          composer global config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer global require moodlehq/moodle-coding-standard --no-progress
+          phpcs --config-set installed_paths ~/.composer/vendor/moodlehq/moodle-coding-standard
           echo "📘 Estándares instalados:"
           phpcs -i
 
