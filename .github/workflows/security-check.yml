@@ -1,0 +1,46 @@
+# Nombre del workflow
+name: Moodle Code & Security Check
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  moodle-check:
+    name: Run Moodle Code Checker
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Descarga el código de tu repositorio
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      # 2. Configura PHP 5.4 (requerido por Moodle 2.5)
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '5.4' # <-- Versión de PHP para Moodle 2.5
+          extensions: mbstring, mysqli, gd, intl, soap, xmlrpc, zip
+          coverage: none
+
+      # 3. Clona el código fuente de Moodle 2.5
+      - name: Clone Moodle Core
+        uses: actions/checkout@v4
+        with:
+          repository: 'moodle/moodle'
+          ref: 'MOODLE_25_STABLE' # <-- La rama para Moodle 2.5
+          path: 'moodle'
+
+      # 4. Clona la herramienta Moodle Code Checker
+      - name: Clone Moodle Code Checker plugin
+        uses: actions/checkout@v4
+        with:
+          repository: 'moodle/moodle-local_codechecker'
+          path: 'moodle/local/codechecker'
+
+      # 5. Ejecuta el Moodle Code Checker
+      - name: Run Moodle Code Checker
+        run: |
+          php moodle/admin/tool/codechecker/cli/check.php --ci --show-summary ${{ github.workspace }}
