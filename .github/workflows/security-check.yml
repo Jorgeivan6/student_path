@@ -20,7 +20,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.1'  # Ajusta según la versión de Moodle que uses
+          php-version: '8.1'
           tools: composer, phpstan, phpcs
           extensions: mbstring, mysqli, xml, curl, intl, zip, json
 
@@ -29,7 +29,7 @@ jobs:
         run: |
           echo "🔍 Verificando archivo version.php..."
           php -r '
-            $plugin = new stdClass(); // Crear antes de incluir
+            $plugin = new stdClass();
             include "version.php";
             if (!isset($plugin->requires)) {
                 echo "❌ ERROR: No se encontró \$plugin->requires en version.php\n";
@@ -37,18 +37,19 @@ jobs:
             }
             if ($plugin->requires < 2020042000) {
                 echo "⚠️ Advertencia: Moodle requerido muy antiguo (" . $plugin->requires . "). Considera actualizar a Moodle 4.x o posterior.\n";
-                exit(0); # no falla, solo advierte
+                exit(0);
             }
             echo "✅ version.php válido (Moodle >= 4.0)\n";
           '
 
-      # 4️⃣ Instalar Moodle Coding Standards (desde ZIP)
+      # 4️⃣ Instalar Moodle Coding Standards (desde ZIP, rama main)
       - name: Install Moodle coding standards (PHP CodeSniffer)
         run: |
-          echo "📦 Descargando moodlehq/moodle-codesniffer ZIP..."
-          curl -L https://github.com/moodlehq/moodle-codesniffer/archive/refs/heads/master.zip -o /tmp/moodle-codesniffer.zip
-          unzip -q /tmp/moodle-codesniffer.zip -d /tmp/
-          phpcs --config-set installed_paths /tmp/moodle-codesniffer-master
+          echo "📦 Descargando moodlehq/moodle-codesniffer ZIP (rama main)..."
+          curl -L https://github.com/moodlehq/moodle-codesniffer/archive/refs/heads/main.zip -o /tmp/moodle-codesniffer.zip
+          echo "📂 Descomprimiendo..."
+          unzip -q /tmp/moodle-codesniffer.zip -d /tmp/ || (echo "❌ Error: No se pudo descomprimir el ZIP"; exit 1)
+          phpcs --config-set installed_paths /tmp/moodle-codesniffer-main
           echo "📘 Estándares instalados:"
           phpcs -i
 
@@ -66,11 +67,28 @@ jobs:
           phpstan analyse --level=max . || true
         continue-on-error: true
 
-      # 7️⃣ Mostrar resumen final
+      # 7️⃣ Guardar resultados como artefactos
+      - name: Save reports as artifacts
+        if: always()
+        run: |
+          mkdir -p reports
+          phpcs --standard=Moodle --report=full --report-file=reports/phpcs-report.txt . || true
+          phpstan analyse --error-format=table > reports/phpstan-report.txt || true
+        continue-on-error: true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moodle-security-reports
+          path: reports/
+
+      # 8️⃣ Mostrar resumen final
       - name: Summary report
         run: |
           echo "-----------------------------------------"
           echo "✅ Verificación completada"
           echo "📘 Moodle coding standards: ejecutado"
           echo "🛡️  PHPStan: ejecutado"
+          echo "📂 Reportes guardados como artefactos"
           echo "-----------------------------------------"
