@@ -1,4 +1,4 @@
-# CÓDIGO FINAL RECOMENDADO (RÁPIDO Y ROBUSTO)
+# CÓDIGO CORREGIDO FINAL
 
 name: Moodle Code & Security Check
 
@@ -18,6 +18,9 @@ jobs:
       # 1. Descarga el código de tu repositorio
       - name: Checkout repository code
         uses: actions/checkout@v4
+        with:
+          # --- ESTA ES LA LÍNEA NUEVA QUE SOLUCIONA EL ERROR ---
+          persist-credentials: false
 
       # 2. Configura PHP 5.4
       - name: Setup PHP
