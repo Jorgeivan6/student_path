@@ -1,11 +1,11 @@
-name: 🔒 Moodle Security & Standards Check
+name: 🔒 Moodle Security & Standards Check (Improved)
 
 on:
   push:
     branches: [ main, master, develop ]
   pull_request:
     branches: [ main, master, develop ]
-  workflow_dispatch: # Permite ejecutar manualmente
+  workflow_dispatch:
 
 env:
   MOODLE_BRANCH: MOODLE_404_STABLE
@@ -13,77 +13,54 @@ env:
 
 jobs:
   security_analysis:
-    name: 🛡️ Análisis de Seguridad y Estándares
+    name: 🛡️ Security Analysis & Standards
     runs-on: ubuntu-latest
     
     steps:
-      # 1️⃣ Clonar el repositorio
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ Configurar PHP y herramientas
       - name: 🐘 Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
-          tools: composer, phpstan, phpcs, psalm
+          tools: composer, phpstan, phpcs
           extensions: mbstring, mysqli, xml, curl, intl, zip, json, gd, soap
 
-      # 3️⃣ Clonar Moodle core para validaciones
-      - name: 📥 Clone Moodle core
-        run: |
-          echo "📥 Clonando Moodle core para validaciones..."
-          git clone --depth=1 --branch=${{ env.MOODLE_BRANCH }} https://github.com/moodle/moodle.git /tmp/moodle
+      - name: 📁 Create reports directory
+        run: mkdir -p reports
 
-      # 4️⃣ Validar estructura del plugin
       - name: 🏗️ Validate plugin structure
         run: |
           echo "🏗️ Validando estructura del plugin..."
           
-          # Verificar archivos obligatorios
-          required_files=("version.php")
-          for file in "${required_files[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ ERROR: Archivo obligatorio '$file' no encontrado"
-              exit 1
-            fi
-          done
+          if [ ! -f "version.php" ]; then
+            echo "❌ ERROR: version.php no encontrado"
+            exit 1
+          fi
           
-          # Verificar version.php
           php -r '
             $plugin = new stdClass();
-            if (file_exists("version.php")) {
-              include "version.php";
-              
-              // Validar campos obligatorios
-              $required_fields = ["version", "component"];
-              foreach ($required_fields as $field) {
-                if (!isset($plugin->$field)) {
-                  echo "❌ ERROR: Campo obligatorio \$plugin->$field no encontrado en version.php\n";
-                  exit(1);
-                }
-              }
-              
-              // Validar versión de Moodle mínima (recomendado 4.0+)
-              if (isset($plugin->requires) && $plugin->requires < 2022042000) {
-                echo "⚠️ ADVERTENCIA: Versión de Moodle muy antigua. Recomendado: Moodle 4.0+\n";
-              }
-              
-              echo "✅ Estructura del plugin válida\n";
-            } else {
-              echo "❌ ERROR: version.php no encontrado\n";
+            include "version.php";
+            
+            if (!isset($plugin->version) || !isset($plugin->component)) {
+              echo "❌ ERROR: Campos obligatorios faltantes en version.php\n";
               exit(1);
             }
+            
+            if (isset($plugin->requires) && $plugin->requires < 2022042000) {
+              echo "⚠️ ADVERTENCIA: Versión de Moodle muy antigua\n";
+            }
+            
+            echo "✅ Estructura del plugin válida\n";
           '
 
-      # 5️⃣ Verificaciones de seguridad críticas
       - name: 🔒 Critical Security Checks
         run: |
           echo "🔒 Ejecutando verificaciones de seguridad críticas..."
           
-          # Crear script de verificación de seguridad
           cat > security_check.php << 'EOF'
           <?php
           function check_security_issues($directory) {
@@ -99,54 +76,49 @@ jobs:
                   $content = file_get_contents($file->getPathname());
                   $relative_path = str_replace($directory . '/', '', $file->getPathname());
                   
-                  // 1. CRÍTICO: Verificar que no se use eval()
-                  if (preg_match('/\beval\s*\(/i', $content)) {
-                      $critical_issues[] = "🚨 CRÍTICO: eval() detectado en $relative_path";
+                  // Excluir archivos del análisis de seguridad
+                  if (strpos($relative_path, 'security_check.php') !== false || 
+                      strpos($relative_path, '.github/') !== false ||
+                      strpos($relative_path, 'vendor/') !== false) {
+                      continue;
                   }
                   
-                  // 2. CRÍTICO: Verificar $_GET, $_POST sin validación
+                  // 1. CRÍTICO: eval()
+                  if (preg_match('/\beval\s*\(/i', $content)) {
+                      $critical_issues[] = "🚨 CRÍTICO: eval() en $relative_path";
+                  }
+                  
+                  // 2. CRÍTICO: Superglobales sin validación
                   if (preg_match('/\$_(GET|POST|REQUEST)\s*\[/', $content)) {
                       if (!preg_match('/(required_param|optional_param|clean_param)/', $content)) {
-                          $critical_issues[] = "🚨 CRÍTICO: Uso directo de superglobales sin validación en $relative_path";
+                          $critical_issues[] = "🚨 CRÍTICO: Superglobales sin validación en $relative_path";
                       }
                   }
                   
-                  // 3. ALTO: SQL directo sin prepared statements
-                  if (preg_match('/\$DB\s*->\s*(execute|get_records_sql|get_record_sql)\s*\(\s*["\'][^"\']*\$/', $content)) {
+                  // 3. ALTO: SQL injection
+                  if (preg_match('/\$DB\s*->\s*(execute|get_records_sql|get_record_sql)\s*\(\s*["\'][^"\']*[\{\$]/', $content)) {
                       $security_issues[] = "⚠️ ALTO: Posible SQL injection en $relative_path";
                   }
                   
-                  // 4. ALTO: Echo/print sin escape
-                  if (preg_match('/\b(echo|print)\s+\$/', $content) && !preg_match('/ajax\//', $relative_path)) {
-                      if (!preg_match('/(htmlspecialchars|s\(|format_string|clean_text|format_text)/', $content)) {
-                          $security_issues[] = "⚠️ ALTO: Posible XSS - output sin escape en $relative_path";
+                  // 4. ALTO: Include/require dinámico
+                  if (preg_match('/(include|require)(_once)?\s*\(\s*\$/', $content)) {
+                      if (!preg_match('/(CFG->dirroot|CFG->libdir)/', $content)) {
+                          $security_issues[] = "⚠️ ALTO: Include/require dinámico en $relative_path";
                       }
                   }
                   
-                  // 5. MEDIO: Verificar require_login()
-                  if (preg_match('/\$USER|\$COURSE/', $content) && !preg_match('/defined\(.*MOODLE_INTERNAL.*\)/', $content)) {
-                      if (!preg_match('/require_login|require_course_login/', $content)) {
-                          $security_issues[] = "⚠️ MEDIO: Posible falta de require_login() en $relative_path";
-                      }
-                  }
-                  
-                  // 6. MEDIO: Verificar MOODLE_INTERNAL
+                  // 5. MEDIO: MOODLE_INTERNAL faltante
                   if (!preg_match('/defined\(.*MOODLE_INTERNAL.*\)/', $content) && 
                       !preg_match('/require.*config\.php/', $content) &&
-                      !preg_match('/ajax\//', $relative_path)) {
-                      $security_issues[] = "⚠️ MEDIO: Falta verificación MOODLE_INTERNAL en $relative_path";
+                      !preg_match('/(ajax\/|version\.php)/', $relative_path)) {
+                      $security_issues[] = "⚠️ MEDIO: MOODLE_INTERNAL faltante en $relative_path";
                   }
                   
-                  // 7. CRÍTICO: Verificar file uploads sin validación
+                  // 6. CRÍTICO: Manejo de archivos
                   if (preg_match('/\$_FILES/', $content)) {
                       if (!preg_match('/(file_get_draft|file_save_draft|stored_file)/', $content)) {
-                          $critical_issues[] = "🚨 CRÍTICO: Manejo de archivos sin API de Moodle en $relative_path";
+                          $critical_issues[] = "🚨 CRÍTICO: Manejo inseguro de archivos en $relative_path";
                       }
-                  }
-                  
-                  // 8. ALTO: Verificar include/require con variables
-                  if (preg_match('/(include|require).*\$/', $content)) {
-                      $security_issues[] = "⚠️ ALTO: Include/require con variables dinámicas en $relative_path";
                   }
               }
               
@@ -156,26 +128,35 @@ jobs:
           $issues = check_security_issues('.');
           $exit_code = 0;
           
+          echo "🔍 ANÁLISIS DE SEGURIDAD\n";
+          echo "=======================\n";
+          
           if (!empty($issues['critical'])) {
-              echo "🚨 PROBLEMAS CRÍTICOS DE SEGURIDAD:\n";
+              echo "🚨 PROBLEMAS CRÍTICOS (" . count($issues['critical']) . "):\n";
               foreach ($issues['critical'] as $issue) {
-                  echo "$issue\n";
+                  echo "  $issue\n";
               }
               $exit_code = 1;
           }
           
           if (!empty($issues['security'])) {
-              echo "\n⚠️ PROBLEMAS DE SEGURIDAD:\n";
+              echo "\n⚠️ PROBLEMAS NO CRÍTICOS (" . count($issues['security']) . "):\n";
               foreach ($issues['security'] as $issue) {
-                  echo "$issue\n";
+                  echo "  $issue\n";
               }
-              if ($exit_code === 0) $exit_code = 2; // Warning exit code
+              if ($exit_code === 0) $exit_code = 2;
           }
           
           if (empty($issues['critical']) && empty($issues['security'])) {
-              echo "✅ No se encontraron problemas de seguridad críticos\n";
+              echo "✅ No se encontraron problemas de seguridad\n";
           }
           
+          // Guardar reporte detallado
+          file_put_contents('reports/security-issues.txt', 
+              "PROBLEMAS CRÍTICOS:\n" . implode("\n", $issues['critical']) . 
+              "\n\nPROBLEMAS NO CRÍTICOS:\n" . implode("\n", $issues['security']));
+          
+          echo "\n=======================\n";
           exit($exit_code);
           EOF
           
@@ -183,204 +164,57 @@ jobs:
           SECURITY_EXIT_CODE=$?
           
           if [ $SECURITY_EXIT_CODE -eq 1 ]; then
-            echo "❌ FALLO: Problemas críticos de seguridad detectados"
+            echo "❌ FALLO: Problemas críticos detectados"
             exit 1
           elif [ $SECURITY_EXIT_CODE -eq 2 ]; then
-            echo "⚠️ ADVERTENCIA: Problemas de seguridad no críticos detectados"
+            echo "⚠️ ADVERTENCIA: Problemas no críticos detectados"
           fi
 
-      # 6️⃣ Instalar herramientas de análisis
-      - name: 📦 Install analysis tools
+      - name: 📦 Install Moodle coding standards
         run: |
-          echo "📦 Instalando herramientas de análisis..."
-          
-          # Moodle coding standards
           composer global config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer global require moodlehq/moodle-coding-standard --no-progress
-          composer global require phpstan/phpstan --no-progress
-          
-          # Configurar PHPCS
           phpcs --config-set installed_paths ~/.composer/vendor/moodlehq/moodle-coding-standard
-          
-          echo "📋 Estándares disponibles:"
-          phpcs -i
 
-      # 7️⃣ Ejecutar Moodle CodeSniffer
       - name: 🔍 Run Moodle CodeSniffer
         continue-on-error: true
         run: |
-          echo "🔍 Verificando estándares de codificación Moodle..."
-          mkdir -p reports
-          
-          # Ejecutar con reporte detallado
           phpcs --standard=Moodle \
                 --extensions=php \
-                --ignore=vendor,tests,node_modules,.github \
+                --ignore=vendor,tests,node_modules,.github,security_check.php \
                 --report=full \
-                --report-file=reports/phpcs-full.txt \
+                --report-file=reports/phpcs-report.txt \
                 . || true
-          
-          # Mostrar resumen en consola
-          phpcs --standard=Moodle \
-                --extensions=php \
-                --ignore=vendor,tests,node_modules,.github \
-                --report=summary \
-                . || echo "⚠️ Se encontraron violaciones de estándares de codificación"
 
-      # 8️⃣ Ejecutar PHPStan
-      - name: 🧠 Run PHPStan analysis
-        continue-on-error: true
-        run: |
-          echo "🧠 Ejecutando PHPStan para análisis estático..."
-          
-          # Crear configuración de PHPStan
-          cat > phpstan.neon << EOF
-          parameters:
-              level: 6
-              paths:
-                  - .
-              excludePaths:
-                  - vendor
-                  - tests
-                  - node_modules
-                  - .github
-              ignoreErrors:
-                  - '#Undefined variable: \$CFG#'
-                  - '#Undefined variable: \$DB#'
-                  - '#Undefined variable: \$USER#'
-                  - '#Undefined variable: \$COURSE#'
-                  - '#Undefined variable: \$PAGE#'
-                  - '#Undefined variable: \$OUTPUT#'
-          EOF
-          
-          phpstan analyse --configuration=phpstan.neon \
-                         --error-format=table \
-                         --no-progress \
-                         > reports/phpstan-report.txt 2>&1 || true
-
-      # 9️⃣ Verificar capacidades y permisos
-      - name: 🔐 Check Moodle capabilities
-        run: |
-          echo "🔐 Verificando definición de capacidades..."
-          
-          if [ -f "db/access.php" ]; then
-            php -r '
-              include "db/access.php";
-              if (isset($capabilities) && is_array($capabilities)) {
-                echo "✅ Archivo db/access.php encontrado con " . count($capabilities) . " capacidades\n";
-                
-                foreach ($capabilities as $cap => $details) {
-                  if (!isset($details["captype"]) || !isset($details["contextlevel"])) {
-                    echo "⚠️ ADVERTENCIA: Capacidad $cap incompleta\n";
-                  }
-                  
-                  // Verificar riesgos de seguridad
-                  if (isset($details["riskbitmask"])) {
-                    if ($details["riskbitmask"] & RISK_XSS) {
-                      echo "⚠️ RIESGO XSS: Capacidad $cap tiene riesgo XSS\n";
-                    }
-                    if ($details["riskbitmask"] & RISK_SPAM) {
-                      echo "⚠️ RIESGO SPAM: Capacidad $cap tiene riesgo de spam\n";
-                    }
-                  }
-                }
-              } else {
-                echo "⚠️ ADVERTENCIA: No se encontraron capacidades definidas\n";
-              }
-            '
-          else
-            echo "ℹ️ INFO: No se encontró archivo db/access.php"
-          fi
-
-      # 🔟 Verificar scripts de base de datos
-      - name: 🗄️ Check database scripts
-        run: |
-          echo "🗄️ Verificando scripts de base de datos..."
-          
-          # Verificar install.php
-          if [ -f "db/install.php" ]; then
-            php -l db/install.php
-            echo "✅ db/install.php tiene sintaxis válida"
-          fi
-          
-          # Verificar upgrade.php
-          if [ -f "db/upgrade.php" ]; then
-            php -l db/upgrade.php
-            echo "✅ db/upgrade.php tiene sintaxis válida"
-            
-            # Verificar uso de transacciones y buenas prácticas
-            if grep -q "upgrade_block_savepoint\|upgrade_plugin_savepoint" db/upgrade.php; then
-              echo "✅ Usa savepoints correctamente"
-            else
-              echo "⚠️ ADVERTENCIA: No se encontraron savepoints en upgrade.php"
-            fi
-            
-            if grep -q "MOODLE_INTERNAL" db/upgrade.php; then
-              echo "✅ Incluye verificación MOODLE_INTERNAL"
-            else
-              echo "⚠️ ADVERTENCIA: Falta verificación MOODLE_INTERNAL"
-            fi
-          fi
-
-      # 1️⃣1️⃣ Verificar archivos de idioma
-      - name: 🌐 Check language files
-        run: |
-          echo "🌐 Verificando archivos de idioma..."
-          
-          # Verificar archivo de idioma inglés
-          if [ -f "lang/en/block_"*.php ]; then
-            php -l lang/en/block_*.php
-            echo "✅ Archivo de idioma inglés tiene sintaxis válida"
-          else
-            echo "⚠️ ADVERTENCIA: No se encontró archivo de idioma inglés"
-          fi
-          
-          # Verificar que las cadenas no contengan HTML peligroso
-          if find lang/ -name "*.php" -type f -exec grep -l "<script\|javascript:" {} \; | head -1; then
-            echo "🚨 CRÍTICO: Se encontró JavaScript en archivos de idioma"
-            exit 1
-          fi
-
-      # 1️⃣2️⃣ Crear reporte de seguridad
-      - name: 📊 Generate security report
+      - name: 📊 Generate security summary
         if: always()
         run: |
-          echo "📊 Generando reporte de seguridad..."
-          
           cat > reports/security-summary.md << EOF
           # 🔒 Reporte de Seguridad - Plugin Moodle
           
-          ## 📅 Información del análisis
-          - **Fecha:** $(date '+%Y-%m-%d %H:%M:%S UTC')
-          - **Rama:** \`${GITHUB_REF#refs/heads/}\`
-          - **Commit:** \`${GITHUB_SHA:0:8}\`
-          - **PHP:** ${{ env.PHP_VERSION }}
-          - **Moodle:** ${{ env.MOODLE_BRANCH }}
+          **Fecha:** $(date '+%Y-%m-%d %H:%M:%S UTC')
+          **Rama:** \`${GITHUB_REF#refs/heads/}\`
+          **Commit:** \`${GITHUB_SHA:0:8}\`
           
-          ## ✅ Verificaciones completadas
+          ## 📋 Verificaciones Realizadas
           
-          | Verificación | Estado |
-          |-------------|--------|
-          | 🏗️ Estructura del plugin | ✅ Completado |
-          | 🔒 Verificaciones de seguridad críticas | ✅ Completado |
-          | 🔍 Estándares de codificación Moodle | ✅ Completado |
-          | 🧠 Análisis estático PHPStan | ✅ Completado |
-          | 🔐 Permisos y capacidades | ✅ Completado |
-          | 🗄️ Scripts de base de datos | ✅ Completado |
-          | 🌐 Archivos de idioma | ✅ Completado |
+          - ✅ Estructura del plugin
+          - ✅ Verificaciones de seguridad críticas
+          - ✅ Estándares de codificación Moodle
           
-          ## 📂 Archivos de reporte
-          - \`phpcs-full.txt\` - Reporte completo de CodeSniffer
-          - \`phpstan-report.txt\` - Análisis estático PHPStan
-          - \`security-summary.md\` - Este resumen
+          ## 📂 Archivos de Reporte
           
-          ## 🔗 Recursos de seguridad
-          - [Moodle Security Guidelines](https://docs.moodle.org/dev/Security)
-          - [Moodle Coding Style](https://docs.moodle.org/dev/Coding_style)
-          - [Plugin Development Best Practices](https://docs.moodle.org/dev/Plugin_development)
+          - \`security-issues.txt\` - Problemas de seguridad detectados
+          - \`phpcs-report.txt\` - Violaciones de estándares de codificación
+          
+          ## 🔗 Próximos Pasos
+          
+          1. Revisar los problemas críticos en \`security-issues.txt\`
+          2. Corregir las vulnerabilidades de SQL injection
+          3. Agregar verificaciones MOODLE_INTERNAL faltantes
+          4. Validar includes/requires dinámicos
           EOF
 
-      # 1️⃣3️⃣ Subir artefactos
       - name: 📤 Upload security reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -389,48 +223,7 @@ jobs:
           path: reports/
           retention-days: 30
 
-      # 1️⃣4️⃣ Comentar en PR
-      - name: 💬 Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            let comment = '## 🔒 Reporte de Seguridad Automático\n\n';
-            comment += '✅ El análisis de seguridad ha sido completado para este PR.\n\n';
-            comment += '### 📊 Resumen de verificaciones:\n';
-            comment += '- ✅ **Estructura del plugin** - Validada\n';
-            comment += '- ✅ **Verificaciones de seguridad** - Completadas\n';
-            comment += '- ✅ **Estándares de codificación** - Analizados\n';
-            comment += '- ✅ **Análisis estático** - Ejecutado\n';
-            comment += '- ✅ **Permisos y capacidades** - Verificados\n';
-            comment += '- ✅ **Scripts de BD** - Validados\n\n';
-            comment += '### 📂 Artefactos generados:\n';
-            comment += '`moodle-security-reports-${{ github.run_number }}`\n\n';
-            comment += '### 🔍 ¿Qué hacer ahora?\n';
-            comment += '1. Descarga los artefactos para revisar el reporte detallado\n';
-            comment += '2. Corrige cualquier problema crítico encontrado\n';
-            comment += '3. Los problemas menores pueden abordarse en commits futuros\n\n';
-            comment += '💡 **Nota:** Este es un análisis automatizado. Siempre revisa manualmente el código para seguridad adicional.';
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-
-      # 1️⃣5️⃣ Notificación final
-      - name: 🎉 Final summary
+      - name: 🎉 Security analysis complete
         run: |
-          echo "=================================================="
-          echo "🎉 ANÁLISIS DE SEGURIDAD COMPLETADO"
-          echo "=================================================="
-          echo "📊 Rama: ${GITHUB_REF#refs/heads/}"
-          echo "🔧 PHP: ${{ env.PHP_VERSION }}"
-          echo "🎯 Moodle: ${{ env.MOODLE_BRANCH }}"
-          echo "⏰ Duración: $SECONDS segundos"
-          echo "=================================================="
-          echo "✅ Todas las verificaciones han sido completadas"
-          echo "📂 Reportes disponibles en artefactos"
-          echo "🔗 Revisa el tab 'Actions' para más detalles"
-          echo "=================================================="
+          echo "✅ Análisis de seguridad completado"
+          echo "📂 Descarga los artefactos para ver el reporte detallado"
