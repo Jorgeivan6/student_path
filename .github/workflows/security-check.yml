@@ -1,5 +1,3 @@
-# CÓDIGO CORREGIDO FINAL
-
 name: Moodle Code & Security Check
 
 on:
@@ -15,14 +13,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Descarga el código de tu repositorio
       - name: Checkout repository code
         uses: actions/checkout@v4
         with:
-          # --- ESTA ES LA LÍNEA NUEVA QUE SOLUCIONA EL ERROR ---
+          # --- ASEGÚRATE DE QUE ESTA LÍNEA ESTÉ AQUÍ ---
           persist-credentials: false
 
-      # 2. Configura PHP 5.4
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -30,15 +26,12 @@ jobs:
           extensions: mbstring, mysqli, gd, intl, soap, xmlrpc, zip
           coverage: none
 
-      # 3. Clona el código fuente de Moodle 2.5 (Método rápido)
       - name: Clone Moodle Core
         run: git clone --depth 1 --branch MOODLE_25_STABLE https://github.com/moodle/moodle.git moodle
 
-      # 4. Clona la herramienta Moodle Code Checker (Método rápido)
       - name: Clone Moodle Code Checker plugin
         run: git clone --depth 1 https://github.com/moodle/moodle-local_codechecker.git moodle/local/codechecker
 
-      # 5. Ejecuta el Moodle Code Checker
       - name: Run Moodle Code Checker
         run: |
           php moodle/admin/tool/codechecker/cli/check.php --ci --show-summary ${{ github.workspace }}
