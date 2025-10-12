@@ -1,18 +1,12 @@
-# Nombre del workflow
+# CÓDIGO FINAL RECOMENDADO (RÁPIDO Y ROBUSTO)
+
 name: Moodle Code & Security Check
 
 on:
-  # Se ejecuta al subir código a la rama master
   push:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
-
-  # Se ejecutará aproximadamente a las 00:41 UTC
-  schedule:
-    - cron:  '41 0 * * *'
-
-  # Permite ejecutarlo manualmente desde la pestaña Actions
   workflow_dispatch:
 
 jobs:
@@ -25,7 +19,7 @@ jobs:
       - name: Checkout repository code
         uses: actions/checkout@v4
 
-      # 2. Configura PHP 5.4 (requerido por Moodle 2.5)
+      # 2. Configura PHP 5.4
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -33,20 +27,13 @@ jobs:
           extensions: mbstring, mysqli, gd, intl, soap, xmlrpc, zip
           coverage: none
 
-      # 3. Clona el código fuente de Moodle 2.5
+      # 3. Clona el código fuente de Moodle 2.5 (Método rápido)
       - name: Clone Moodle Core
-        uses: actions/checkout@v4
-        with:
-          repository: 'moodle/moodle'
-          ref: 'MOODLE_25_STABLE'
-          path: 'moodle'
+        run: git clone --depth 1 --branch MOODLE_25_STABLE https://github.com/moodle/moodle.git moodle
 
-      # 4. Clona la herramienta Moodle Code Checker
+      # 4. Clona la herramienta Moodle Code Checker (Método rápido)
       - name: Clone Moodle Code Checker plugin
-        uses: actions/checkout@v4
-        with:
-          repository: 'moodle/moodle-local_codechecker'
-          path: 'moodle/local/codechecker'
+        run: git clone --depth 1 https://github.com/moodle/moodle-local_codechecker.git moodle/local/codechecker
 
       # 5. Ejecuta el Moodle Code Checker
       - name: Run Moodle Code Checker
