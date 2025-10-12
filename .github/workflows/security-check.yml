@@ -2,10 +2,18 @@
 name: Moodle Code & Security Check
 
 on:
+  # Se ejecuta al subir código a la rama master
   push:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+
+  # Se ejecutará aproximadamente a las 00:41 UTC
+  schedule:
+    - cron:  '41 0 * * *'
+
+  # Permite ejecutarlo manualmente desde la pestaña Actions
+  workflow_dispatch:
 
 jobs:
   moodle-check:
@@ -21,7 +29,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '5.4' # <-- Versión de PHP para Moodle 2.5
+          php-version: '5.4'
           extensions: mbstring, mysqli, gd, intl, soap, xmlrpc, zip
           coverage: none
 
@@ -30,7 +38,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 'moodle/moodle'
-          ref: 'MOODLE_25_STABLE' # <-- La rama para Moodle 2.5
+          ref: 'MOODLE_25_STABLE'
           path: 'moodle'
 
       # 4. Clona la herramienta Moodle Code Checker
