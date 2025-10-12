@@ -16,11 +16,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Instalar PHP y herramientas necesarias
+      # 2️⃣ Configurar PHP y herramientas
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.1'  # Ajusta según tu versión Moodle (8.0–8.2 es lo usual)
+          php-version: '8.1'  # Ajusta según la versión de Moodle que uses
           tools: composer, phpstan, phpcs
           extensions: mbstring, mysqli, xml, curl, intl, zip, json
 
@@ -42,12 +42,13 @@ jobs:
             echo "✅ version.php válido (Moodle >= 4.0)\n";
           '
 
-      # 4️⃣ Instalar Moodle Coding Standards (desde GitHub)
+      # 4️⃣ Instalar Moodle Coding Standards (desde ZIP)
       - name: Install Moodle coding standards (PHP CodeSniffer)
         run: |
-          echo "📦 Instalando moodlehq/moodle-codesniffer desde GitHub..."
-          git clone https://github.com/moodlehq/moodle-codesniffer.git /tmp/moodle-codesniffer
-          phpcs --config-set installed_paths /tmp/moodle-codesniffer
+          echo "📦 Descargando moodlehq/moodle-codesniffer ZIP..."
+          curl -L https://github.com/moodlehq/moodle-codesniffer/archive/refs/heads/master.zip -o /tmp/moodle-codesniffer.zip
+          unzip -q /tmp/moodle-codesniffer.zip -d /tmp/
+          phpcs --config-set installed_paths /tmp/moodle-codesniffer-master
           echo "📘 Estándares instalados:"
           phpcs -i
 
@@ -58,7 +59,7 @@ jobs:
           phpcs --standard=Moodle --extensions=php --ignore=vendor,tests . || true
         continue-on-error: true
 
-      # 6️⃣ Ejecutar PHPStan (Análisis estático de seguridad)
+      # 6️⃣ Ejecutar PHPStan (Análisis estático)
       - name: Run PHPStan (Static Analysis)
         run: |
           echo "🧠 Ejecutando PHPStan para análisis estático..."
