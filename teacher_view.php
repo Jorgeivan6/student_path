@@ -22,7 +22,7 @@ $COURSE_ROLED_AS_TEACHER = $DB->get_record_sql("
     LEFT JOIN {role_assignments} m2 ON m.id = m2.userid 
     LEFT JOIN {context} m3 ON m2.contextid = m3.id 
     LEFT JOIN {course} m4 ON m3.instanceid = m4.id 
-    WHERE (m3.contextlevel = 50 AND m2.roleid IN (3, 4) AND m.id IN ( {$USER->id} )) 
+    WHERE (m3.contextlevel = 50 AND m2.roleid IN (3, 4) AND m.id = {$USER->id}) 
     AND m4.id = {$courseid} 
 ");
 
