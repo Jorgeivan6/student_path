@@ -197,13 +197,13 @@ jobs:
           php security_scanner.php | tee -a reports/security-analysis.txt
 
 
-      # 5️⃣ Instalar herramientas (MEJORADO - NUNCA FALLA)
-      - name: 📦 Install analysis tools (Robust)
+      # 5️⃣ Instalar herramientas con Moodle Standard 
+      - name: 📦 Install analysis tools with Moodle Standard
         continue-on-error: true
         run: |
-          echo "📦 === INSTALACIÓN ROBUSTA DE HERRAMIENTAS ===" | tee reports/tools-installation.txt
+          echo "📦 === INSTALACIÓN COMPLETA CON ESTÁNDAR MOODLE ===" | tee reports/tools-installation.txt
           
-          # Configurar Composer para mayor tolerancia
+          # Configurar Composer
           composer global config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer global config minimum-stability dev
           composer global config prefer-stable true
@@ -211,78 +211,100 @@ jobs:
           echo "🔧 Instalando PHPStan..." | tee -a reports/tools-installation.txt
           composer global require phpstan/phpstan --no-progress 2>&1 | tee -a reports/tools-installation.txt || echo "⚠️ PHPStan installation had issues but continuing..."
           
-          echo "🔧 Instalando PHP CodeSniffer base..." | tee -a reports/tools-installation.txt
+          echo "🔧 Instalando PHP CodeSniffer..." | tee -a reports/tools-installation.txt
           composer global require squizlabs/php_codesniffer --no-progress 2>&1 | tee -a reports/tools-installation.txt || echo "⚠️ PHPCS installation had issues but continuing..."
           
-          echo "🔧 Intentando instalar Moodle Coding Standards..." | tee -a reports/tools-installation.txt
+          echo "🔧 Instalando plugin de PHPCS..." | tee -a reports/tools-installation.txt
+          composer global require dealerdirect/phpcodesniffer-composer-installer --no-progress 2>&1 | tee -a reports/tools-installation.txt || echo "⚠️ Plugin installation had issues but continuing..."
           
-          # Método 1: Paquete oficial
-          if composer global require moodlehq/moodle-coding-standard --no-progress 2>&1 | tee -a reports/tools-installation.txt; then
-            echo "✅ Moodle Coding Standard instalado exitosamente" | tee -a reports/tools-installation.txt
-            phpcs --config-set installed_paths ~/.composer/vendor/moodlehq/moodle-coding-standard 2>&1 | tee -a reports/tools-installation.txt
-          else
-            echo "⚠️ Paquete oficial no disponible, usando método alternativo..." | tee -a reports/tools-installation.txt
+          echo "📥 Instalando Moodle Coding Standard desde GitHub..." | tee -a reports/tools-installation.txt
+          
+          # Crear directorio para estándares personalizados
+          mkdir -p ~/.phpcs/standards
+          
+          # Clonar el repositorio oficial de Moodle CS
+          if git clone https://github.com/moodlehq/moodle-cs.git ~/.phpcs/standards/moodle-cs 2>&1 | tee -a reports/tools-installation.txt; then
+            echo "✅ Moodle CS clonado exitosamente" | tee -a reports/tools-installation.txt
             
-            # Método 2: Instalar desde Git directamente
-            echo "📥 Clonando Moodle Coding Standards desde GitHub..." | tee -a reports/tools-installation.txt
-            mkdir -p ~/.composer/vendor/moodlehq
-            git clone https://github.com/moodlehq/moodle-cs.git ~/.composer/vendor/moodlehq/moodle-coding-standard 2>&1 | tee -a reports/tools-installation.txt || echo "⚠️ Git clone failed"
-            
-            if [ -d ~/.composer/vendor/moodlehq/moodle-coding-standard ]; then
-              phpcs --config-set installed_paths ~/.composer/vendor/moodlehq/moodle-coding-standard 2>&1 | tee -a reports/tools-installation.txt
-              echo "✅ Moodle CS instalado desde Git" | tee -a reports/tools-installation.txt
+            # Configurar PHPCS para usar el estándar de Moodle
+            if command -v phpcs &> /dev/null; then
+              phpcs --config-set installed_paths ~/.phpcs/standards/moodle-cs 2>&1 | tee -a reports/tools-installation.txt
+              echo "✅ Moodle standard configurado en PHPCS" | tee -a reports/tools-installation.txt
             else
-              echo "⚠️ Usando estándares básicos (PSR2, PSR12)" | tee -a reports/tools-installation.txt
+              echo "⚠️ PHPCS no disponible para configurar" | tee -a reports/tools-installation.txt
+            fi
+          else
+            echo "⚠️ No se pudo clonar Moodle CS, intentando método alternativo..." | tee -a reports/tools-installation.txt
+            
+            # Método alternativo: descargar ZIP
+            curl -L https://github.com/moodlehq/moodle-cs/archive/refs/heads/main.zip -o moodle-cs.zip 2>&1 | tee -a reports/tools-installation.txt
+            if [ -f "moodle-cs.zip" ]; then
+              unzip -q moodle-cs.zip
+              mv moodle-cs-main ~/.phpcs/standards/moodle-cs
+              phpcs --config-set installed_paths ~/.phpcs/standards/moodle-cs 2>&1 | tee -a reports/tools-installation.txt || true
+              echo "✅ Moodle CS instalado desde ZIP" | tee -a reports/tools-installation.txt
+              rm -f moodle-cs.zip
+            else
+              echo "⚠️ Usando estándares básicos como fallback" | tee -a reports/tools-installation.txt
             fi
           fi
           
-          echo "📋 Verificando herramientas instaladas:" | tee -a reports/tools-installation.txt
+          echo "📋 Verificando instalación completa:" | tee -a reports/tools-installation.txt
           
           # Verificar PHPStan
           if command -v phpstan &> /dev/null; then
             phpstan_version=$(phpstan --version 2>/dev/null || echo 'instalado')
-            echo "✅ PHPStan disponible: $phpstan_version" | tee -a reports/tools-installation.txt
+            echo "✅ PHPStan: $phpstan_version" | tee -a reports/tools-installation.txt
           else
             echo "⚠️ PHPStan no disponible" | tee -a reports/tools-installation.txt
           fi
           
-          # Verificar PHPCS
+          # Verificar PHPCS y estándares
           if command -v phpcs &> /dev/null; then
             phpcs_version=$(phpcs --version 2>/dev/null || echo 'instalado')
-            echo "✅ PHPCS disponible: $phpcs_version" | tee -a reports/tools-installation.txt
-            echo "📋 Estándares disponibles:" | tee -a reports/tools-installation.txt
-            phpcs -i 2>&1 | tee -a reports/tools-installation.txt || echo "PSR2, PSR12, PEAR disponibles"
+            echo "✅ PHPCS: $phpcs_version" | tee -a reports/tools-installation.txt
+            
+            echo "📋 Estándares de codificación disponibles:" | tee -a reports/tools-installation.txt
+            phpcs -i 2>&1 | tee -a reports/tools-installation.txt
+            
+            # Verificar específicamente si Moodle está disponible
+            if phpcs -i | grep -q "Moodle"; then
+              echo "🎉 ¡Estándar Moodle disponible!" | tee -a reports/tools-installation.txt
+            else
+              echo "⚠️ Estándar Moodle no detectado, usaremos PSR12" | tee -a reports/tools-installation.txt
+            fi
           else
             echo "⚠️ PHPCS no disponible" | tee -a reports/tools-installation.txt
           fi
           
-          echo "✅ Instalación completada (continuando con análisis)" | tee -a reports/tools-installation.txt
+          echo "✅ Instalación con Moodle Standard completada" | tee -a reports/tools-installation.txt
 
-          
-      # 6️⃣ CodeSniffer mejorado (NUNCA FALLA)
-      - name: 🔍 Enhanced CodeSniffer Analysis
+
+
+      # 6️⃣ CodeSniffer con Estándar Moodle
+      - name: 🔍 Moodle CodeSniffer Analysis
         continue-on-error: true
         run: |
-          echo "🔍 === ANÁLISIS DE ESTÁNDARES DE CODIFICACIÓN ===" | tee reports/coding-standards.txt
+          echo "🔍 === ANÁLISIS CON ESTÁNDAR MOODLE ===" | tee reports/coding-standards.txt
           
           if command -v phpcs &> /dev/null; then
-            echo "📊 Ejecutando PHPCS..." | tee -a reports/coding-standards.txt
+            echo "📊 Ejecutando PHPCS con estándar Moodle..." | tee -a reports/coding-standards.txt
             
             # Verificar si Moodle standard está disponible
             if phpcs -i | grep -q "Moodle"; then
-              echo "✅ Usando estándar Moodle" | tee -a reports/coding-standards.txt
+              echo "✅ Usando estándar oficial de Moodle" | tee -a reports/coding-standards.txt
               STANDARD="Moodle"
             else
               echo "⚠️ Estándar Moodle no disponible, usando PSR12" | tee -a reports/coding-standards.txt
               STANDARD="PSR12"
             fi
             
-            # Reporte completo
+            # Reporte completo con estándar Moodle
             phpcs --standard=$STANDARD \
                   --extensions=php \
                   --ignore=vendor,tests,node_modules,.github,security_scanner.php \
                   --report=full \
-                  --report-file=reports/phpcs-complete-report.txt \
+                  --report-file=reports/phpcs-moodle-report.txt \
                   . 2>&1 || true
             
             # Reporte de resumen
@@ -292,16 +314,18 @@ jobs:
                   --report=summary \
                   . 2>&1 | tee -a reports/coding-standards.txt || true
             
-            # Contar violaciones
-            violations=$(wc -l < reports/phpcs-complete-report.txt 2>/dev/null || echo "0")
-            echo "📊 Líneas en reporte: $violations" | tee -a reports/coding-standards.txt
+            # Estadísticas específicas de Moodle
+            if [ "$STANDARD" = "Moodle" ]; then
+              echo "📊 Análisis específico con reglas de Moodle:" | tee -a reports/coding-standards.txt
+              violations=$(grep -c "ERROR\|WARNING" reports/phpcs-moodle-report.txt 2>/dev/null || echo "0")
+              echo "📈 Violaciones encontradas: $violations" | tee -a reports/coding-standards.txt
+            fi
+            
           else
             echo "⚠️ PHPCS no disponible - saltando análisis de estándares" | tee -a reports/coding-standards.txt
-            echo "ℹ️ El análisis de seguridad personalizado continuará funcionando" | tee -a reports/coding-standards.txt
           fi
           
-          echo "✅ Análisis de estándares completado" | tee -a reports/coding-standards.txt
-
+          echo "✅ Análisis de estándares Moodle completado" | tee -a reports/coding-standards.txt
 
       # 7️⃣ PHPStan completo (NUNCA FALLA)
       - name: 🧠 Complete PHPStan Analysis
