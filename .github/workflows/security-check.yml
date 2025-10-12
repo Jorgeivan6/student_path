@@ -12,21 +12,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Clonar el repositorio
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2️⃣ Instalar PHP y herramientas necesarias
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.1'  # Ajusta según la versión de Moodle que uses (8.0–8.2)
+          php-version: '8.1'  # Ajusta según tu versión Moodle (8.0–8.2 es lo usual)
           tools: composer, phpstan, phpcs
           extensions: mbstring, mysqli, xml, curl, intl, zip, json
 
+      # 3️⃣ Validar archivo version.php
       - name: Validate version.php (minimum Moodle version)
         run: |
           echo "🔍 Verificando archivo version.php..."
           php -r '
-            $plugin = new stdClass(); // 🧠 crear antes de incluir
+            $plugin = new stdClass(); // Crear antes de incluir
             include "version.php";
             if (!isset($plugin->requires)) {
                 echo "❌ ERROR: No se encontró \$plugin->requires en version.php\n";
@@ -39,24 +42,30 @@ jobs:
             echo "✅ version.php válido (Moodle >= 4.0)\n";
           '
 
+      # 4️⃣ Instalar Moodle Coding Standards (desde GitHub)
       - name: Install Moodle coding standards (PHP CodeSniffer)
         run: |
-          echo "📦 Instalando moodlehq/moodle-codesniffer..."
-          composer global require "moodlehq/moodle-codesniffer"
-          ~/.composer/vendor/bin/phpcs --config-set installed_paths ~/.composer/vendor/moodlehq/moodle-codesniffer
+          echo "📦 Instalando moodlehq/moodle-codesniffer desde GitHub..."
+          git clone https://github.com/moodlehq/moodle-codesniffer.git /tmp/moodle-codesniffer
+          phpcs --config-set installed_paths /tmp/moodle-codesniffer
+          echo "📘 Estándares instalados:"
+          phpcs -i
 
+      # 5️⃣ Ejecutar PHP CodeSniffer con estándar Moodle
       - name: Run Moodle CodeSniffer
         run: |
           echo "🔎 Verificando estándares de codificación Moodle..."
-          ~/.composer/vendor/bin/phpcs --standard=Moodle --extensions=php --ignore=vendor,tests . || true
+          phpcs --standard=Moodle --extensions=php --ignore=vendor,tests . || true
         continue-on-error: true
 
+      # 6️⃣ Ejecutar PHPStan (Análisis estático de seguridad)
       - name: Run PHPStan (Static Analysis)
         run: |
-          echo "🔍 Ejecutando PHPStan..."
+          echo "🧠 Ejecutando PHPStan para análisis estático..."
           phpstan analyse --level=max . || true
         continue-on-error: true
 
+      # 7️⃣ Mostrar resumen final
       - name: Summary report
         run: |
           echo "-----------------------------------------"
