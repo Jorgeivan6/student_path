@@ -26,14 +26,15 @@ jobs:
         run: |
           echo "🔍 Verificando archivo version.php..."
           php -r '
+            $plugin = new stdClass(); // 🧠 crear antes de incluir
             include "version.php";
-            if (!isset($plugin)) {
-              echo "❌ ERROR: No se encontró \$plugin en version.php\n";
-              exit(1);
+            if (!isset($plugin->requires)) {
+                echo "❌ ERROR: No se encontró \$plugin->requires en version.php\n";
+                exit(1);
             }
             if ($plugin->requires < 2020042000) {
-              echo "⚠️ Advertencia: Moodle requerido muy antiguo (" . $plugin->requires . "). Considera actualizar a Moodle 4.x o posterior.\n";
-              exit(0); # no falla el pipeline, solo avisa
+                echo "⚠️ Advertencia: Moodle requerido muy antiguo (" . $plugin->requires . "). Considera actualizar a Moodle 4.x o posterior.\n";
+                exit(0); # no falla, solo advierte
             }
             echo "✅ version.php válido (Moodle >= 4.0)\n";
           '
