@@ -49,7 +49,7 @@ jobs:
           function analyze_complete_security($directory) {
               $results = [
                   'critical' => [], 'high' => [], 'medium' => [], 'low' => [], 'info' => [],
-                  'files_scanned' => 0, 'total_issues' => 0
+                  'files_scanned' => 0, 'total_issues' => 0, 'best_practices' => []
               ];
               
               $iterator = new RecursiveIteratorIterator(
@@ -75,7 +75,7 @@ jobs:
                   // CRITICAL: eval() usage
                   foreach ($lines as $lineNum => $line) {
                       if (preg_match('/\beval\s*\(/i', $line)) {
-                          $results['critical'][] = "🚨 CRÍTICO: eval() en $path (Línea " . ($lineNum + 1) . ")";
+                          $results['critical'][] = "🚨 CRÍTICO: eval() en $path (Línea " . ($lineNum + 1) . ") - NUNCA usar eval()";
                       }
                   }
                   
@@ -83,25 +83,32 @@ jobs:
                   foreach ($lines as $lineNum => $line) {
                       if (preg_match('/\$_(GET|POST|REQUEST|COOKIE)\s*\[/', $line)) {
                           if (!preg_match('/(required_param|optional_param|clean_param)/', $line)) {
-                              $results['critical'][] = "🚨 CRÍTICO: Superglobales sin validación en $path (Línea " . ($lineNum + 1) . ")";
+                              $results['critical'][] = "🚨 CRÍTICO: Superglobales sin validación en $path (Línea " . ($lineNum + 1) . ") - Usar required_param/optional_param";
                           }
                       }
                   }
                   
-                  // HIGH: SQL injection potential
+                  // CRITICAL: SQL injection potential
                   foreach ($lines as $lineNum => $line) {
-                      if (preg_match('/\$DB.*get_record.*sql.*\$/', $line)) {
+                      if (preg_match('/\$DB->(get_record|get_records|get_field).*\$/', $line)) {
                           if (!preg_match('/\?\s*[,\)]/', $line)) {
-                              $results['high'][] = "⚠️ ALTO: Posible SQL injection en $path (Línea " . ($lineNum + 1) . ")";
+                              $results['critical'][] = "🚨 CRÍTICO: Posible SQL injection en $path (Línea " . ($lineNum + 1) . ") - Usar placeholders (?)";
                           }
+                      }
+                  }
+                  
+                  // CRITICAL: Direct database queries
+                  foreach ($lines as $lineNum => $line) {
+                      if (preg_match('/mysqli_|mysql_query|PDO::/', $line)) {
+                          $results['critical'][] = "🚨 CRÍTICO: Query directa a BD en $path (Línea " . ($lineNum + 1) . ") - Usar $DB API de Moodle";
                       }
                   }
                   
                   // HIGH: XSS potential
                   foreach ($lines as $lineNum => $line) {
                       if (preg_match('/\b(echo|print)\s+\$/', $line)) {
-                          if (!preg_match('/(htmlspecialchars|s\(|format_string)/', $line)) {
-                              $results['high'][] = "⚠️ ALTO: Posible XSS en $path (Línea " . ($lineNum + 1) . ")";
+                          if (!preg_match('/(htmlspecialchars|s\(|format_string|format_text|format_html)/', $line)) {
+                              $results['high'][] = "⚠️ ALTO: Posible XSS en $path (Línea " . ($lineNum + 1) . ") - Usar s() o format_string()";
                           }
                       }
                   }
@@ -110,7 +117,18 @@ jobs:
                   foreach ($lines as $lineNum => $line) {
                       if (preg_match('/(include|require).*\$/', $line)) {
                           if (!preg_match('/(CFG->dirroot|CFG->libdir)/', $line)) {
-                              $results['high'][] = "⚠️ ALTO: Include dinámico en $path (Línea " . ($lineNum + 1) . ")";
+                              $results['high'][] = "⚠️ ALTO: Include dinámico inseguro en $path (Línea " . ($lineNum + 1) . ") - Usar CFG->dirroot";
+                          }
+                      }
+                  }
+                  
+                  // HIGH: Missing capability checks
+                  foreach ($lines as $lineNum => $line) {
+                      if (preg_match('/\$USER|has_capability/', $line)) {
+                          if (!preg_match('/require_login|has_capability|is_admin|is_siteadmin/', $line)) {
+                              if (!preg_match('/lang\/|version\.php|db\//', $path)) {
+                                  $results['high'][] = "⚠️ ALTO: Verificación de permisos faltante en $path (Línea " . ($lineNum + 1) . ")";
+                              }
                           }
                       }
                   }
@@ -118,7 +136,7 @@ jobs:
                   // MEDIUM: Missing MOODLE_INTERNAL
                   if (!preg_match('/defined\(.*MOODLE_INTERNAL.*\)/', $content) && 
                       !preg_match('/require.*config\.php/', $content) &&
-                      !preg_match('/(ajax\/|version\.php)/', $path)) {
+                      !preg_match('/(ajax\/|version\.php|lib\.php)/', $path)) {
                       foreach ($lines as $lineNum => $line) {
                           if (preg_match('/\bfunction\b/', $line)) {
                               $results['medium'][] = "⚠️ MEDIO: MOODLE_INTERNAL faltante en $path (Línea " . ($lineNum + 1) . ")";
@@ -138,26 +156,66 @@ jobs:
                       }
                   }
                   
-                  // CRITICAL: File upload without validation
+                  // MEDIUM: File upload without validation
                   foreach ($lines as $lineNum => $line) {
                       if (preg_match('/\$_FILES/', $line)) {
-                          if (!preg_match('/(file_get_draft|stored_file)/', $content)) {
-                              $results['critical'][] = "🚨 CRÍTICO: Upload inseguro en $path (Línea " . ($lineNum + 1) . ")";
+                          if (!preg_match('/(file_get_draft|stored_file|form|filepicker)/', $content)) {
+                              $results['medium'][] = "⚠️ MEDIO: Upload inseguro en $path (Línea " . ($lineNum + 1) . ") - Usar file_get_draft_area()";
+                          }
+                      }
+                  }
+                  
+                  // MEDIUM: Global context not set
+                  foreach ($lines as $lineNum => $line) {
+                      if (preg_match('/context::/i', $line)) {
+                          if (!preg_match('/context_system|context_course|context_module/', $line)) {
+                              $results['medium'][] = "⚠️ MEDIO: Contexto no especificado en $path (Línea " . ($lineNum + 1) . ")";
+                          }
+                      }
+                  }
+                  
+                  // MEDIUM: Missing nonce/sesskey validation
+                  foreach ($lines as $lineNum => $line) {
+                      if (preg_match('/\$_POST|\$_GET.*action|form_submit/', $line)) {
+                          if (!preg_match('/sesskey|require_sesskey/', $content)) {
+                              $results['medium'][] = "⚠️ MEDIO: Falta validación sesskey en $path (Línea " . ($lineNum + 1) . ")";
+                              break;
                           }
                       }
                   }
                   
                   // LOW: Hardcoded credentials
                   foreach ($lines as $lineNum => $line) {
-                      if (preg_match('/(password|pwd|secret)\s*=\s*["\']/', $line)) {
+                      if (preg_match('/(password|pwd|secret|api_key|token)\s*=\s*["\']/', $i)) {
                           $results['low'][] = "ℹ️ BAJO: Credenciales hardcoded en $path (Línea " . ($lineNum + 1) . ")";
                       }
                   }
                   
                   // INFO: Deprecated functions
                   foreach ($lines as $lineNum => $line) {
-                      if (preg_match('/(mysql_|eregi|split\(|each\()/', $line)) {
+                      if (preg_match('/(mysql_|eregi|split\(|each\(|create_function)/', $line)) {
                           $results['info'][] = "📋 INFO: Funciones deprecated en $path (Línea " . ($lineNum + 1) . ")";
+                      }
+                  }
+                  
+                  // BEST PRACTICE: Check for proper error handling
+                  if (!preg_match('/try.*catch|error_log|debugging/', $content)) {
+                      if (!preg_match('/lang\/|version\.php/', $path)) {
+                          $results['best_practices'][] = "✅ MEJORA: Agregar manejo de errores en $path";
+                      }
+                  }
+                  
+                  // BEST PRACTICE: Check for logging
+                  if (!preg_match('/\$DB->insert_record.*mdl_log|add_to_log/', $content)) {
+                      if (preg_match('/function.*_form_definition|function.*_process/', $path)) {
+                          $results['best_practices'][] = "✅ MEJORA: Considerar agregar logging en $path";
+                      }
+                  }
+                  
+                  // BEST PRACTICE: Check for documentation
+                  if (!preg_match('/\/\*\*.*@param|@return|@since/', $content)) {
+                      if (preg_match('/^[^\/]*function /', $content)) {
+                          $results['best_practices'][] = "✅ MEJORA: Agregar documentación PHPDoc en $path";
                       }
                   }
               }
@@ -181,6 +239,7 @@ jobs:
           echo "⚠️ Medios: " . count($analysis['medium']) . "\n";
           echo "ℹ️ Bajos: " . count($analysis['low']) . "\n";
           echo "📋 Info: " . count($analysis['info']) . "\n";
+          echo "✅ Mejoras recomendadas: " . count($analysis['best_practices']) . "\n";
           echo "📊 TOTAL: " . $analysis['total_issues'] . " problemas\n";
           echo "===================\n\n";
           
@@ -196,24 +255,39 @@ jobs:
               }
           }
           
+          // Display best practices
+          if (!empty($analysis['best_practices'])) {
+              echo "✅ MEJORES PRÁCTICAS RECOMENDADAS (" . count($analysis['best_practices']) . "):\n";
+              foreach ($analysis['best_practices'] as $practice) {
+                  echo "  $practice\n";
+              }
+              echo "\n";
+          }
+          
           if ($analysis['total_issues'] == 0) {
               echo "🎉 ¡EXCELENTE! No se encontraron problemas de seguridad.\n";
           }
           
           // Save detailed report
           file_put_contents('reports/security-detailed-report.txt', 
-              "ANÁLISIS COMPLETO DE SEGURIDAD\n" .
-              "==============================\n\n" .
+              "ANÁLISIS COMPLETO DE SEGURIDAD - MOODLE\n" .
+              "========================================\n\n" .
               "Archivos analizados: " . $analysis['files_scanned'] . "\n" .
-              "Total problemas: " . $analysis['total_issues'] . "\n\n" .
+              "Total problemas: " . $analysis['total_issues'] . "\n" .
+              "Mejoras recomendadas: " . count($analysis['best_practices']) . "\n\n" .
               "DESGLOSE POR SEVERIDAD:\n" .
               "- Críticos: " . count($analysis['critical']) . "\n" .
               "- Altos: " . count($analysis['high']) . "\n" .
               "- Medios: " . count($analysis['medium']) . "\n" .
               "- Bajos: " . count($analysis['low']) . "\n" .
               "- Informativos: " . count($analysis['info']) . "\n\n" .
+              "PROBLEMAS ENCONTRADOS:\n" .
+              "======================\n" .
               implode("\n", array_merge($analysis['critical'], $analysis['high'], 
-                                      $analysis['medium'], $analysis['low'], $analysis['info']))
+                                      $analysis['medium'], $analysis['low'], $analysis['info'])) . "\n\n" .
+              "MEJORES PRÁCTICAS:\n" .
+              "==================\n" .
+              implode("\n", $analysis['best_practices'])
           );
           
           echo "✅ Análisis de seguridad completado - Reporte guardado\n";
