@@ -493,3 +493,196 @@ jobs:
           echo "4. Corrige problemas encontrados"
           echo "5. Ejecuta nuevamente para verificar"
           echo "=================================================="
+
+
+
+
+
+
+
+          
+
+
+
+
+
+
+
+
+          # 4️⃣ Análisis de seguridad COMPLETO (CON NÚMERO DE LÍNEA)
+      - name: 🔒 Complete Security Analysis
+        continue-on-error: true
+        run: |
+          echo "🔒 === ANÁLISIS COMPLETO DE SEGURIDAD ===" | tee reports/security-analysis.txt
+          
+          cat > security_scanner.php << 'EOF'
+          <?php
+          function analyze_complete_security($directory) {
+              $results = [
+                  'critical' => [], 'high' => [], 'medium' => [], 'low' => [], 'info' => [],
+                  'files_scanned' => 0, 'total_issues' => 0
+              ];
+              
+              $iterator = new RecursiveIteratorIterator(
+                  new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS)
+              );
+              
+              foreach ($iterator as $file) {
+                  if ($file->getExtension() !== 'php') continue;
+                  
+                  $filepath = $file->getPathname();
+                  $path = str_replace($directory . '/', '', $filepath);
+                  
+                  // Skip temporary files
+                  if (strpos($path, 'security_scanner.php') !== false || 
+                      strpos($path, '.github/') !== false || 
+                      strpos($path, 'vendor/') !== false) {
+                      continue;
+                  }
+                  
+                  $results['files_scanned']++;
+                  
+                  // Read content for context checks (Global validations)
+                  $content = file_get_contents($filepath);
+                  // Read as array for line numbers
+                  $lines = file($filepath); 
+                  
+                  // Context flags (to preserve logic: if validation exists in file, ignore specific lines)
+                  $hasParamValidation = preg_match('/(required_param|optional_param|clean_param)/', $content);
+                  $hasSqlPlaceholders = preg_match('/\?\s*[,\)]/', $content);
+                  $hasXssProtection   = preg_match('/(htmlspecialchars|s\(|format_string)/', $content);
+                  $validIncludeRoot   = preg_match('/(CFG->dirroot|CFG->libdir)/', $content);
+                  $hasMoodleInternal  = preg_match('/defined\(.*MOODLE_INTERNAL.*\)/', $content) || 
+                                        preg_match('/require.*config\.php/', $content) ||
+                                        preg_match('/(ajax\/|version\.php)/', $path);
+                  $hasRequireLogin    = preg_match('/require_login/', $content) || 
+                                        preg_match('/lang\/|version\.php|db\//', $path);
+                  $hasSafeUpload      = preg_match('/(file_get_draft|stored_file)/', $content);
+
+                  // Iterate line by line to find the error location
+                  foreach ($lines as $index => $line) {
+                      $ln = $index + 1; // Line number (1-based)
+                      $loc = "$path:$ln"; // Format: file.php:10
+
+                      // CRITICAL: eval() usage
+                      if (preg_match('/\beval\s*\(/i', $line)) {
+                          $results['critical'][] = "🚨 CRÍTICO: eval() en $loc";
+                      }
+                      
+                      // CRITICAL: Superglobals without validation
+                      if (preg_match('/\$_(GET|POST|REQUEST|COOKIE)\s*\[/', $line)) {
+                          if (!$hasParamValidation) {
+                              $results['critical'][] = "🚨 CRÍTICO: Superglobales sin validación en $loc";
+                          }
+                      }
+                      
+                      // HIGH: SQL injection potential
+                      if (preg_match('/\$DB.*get_record.*sql.*\$/', $line)) {
+                          if (!$hasSqlPlaceholders) {
+                              $results['high'][] = "⚠️ ALTO: Posible SQL injection en $loc";
+                          }
+                      }
+                      
+                      // HIGH: XSS potential
+                      if (preg_match('/\b(echo|print)\s+\$/', $line)) {
+                          if (!$hasXssProtection) {
+                              $results['high'][] = "⚠️ ALTO: Posible XSS en $loc";
+                          }
+                      }
+                      
+                      // HIGH: Dynamic includes
+                      if (preg_match('/(include|require).*\$/', $line)) {
+                          if (!$validIncludeRoot) {
+                              $results['high'][] = "⚠️ ALTO: Include dinámico en $loc";
+                          }
+                      }
+                      
+                      // CRITICAL: File upload without validation
+                      if (preg_match('/\$_FILES/', $line)) {
+                          if (!$hasSafeUpload) {
+                              $results['critical'][] = "🚨 CRÍTICO: Upload inseguro en $loc";
+                          }
+                      }
+                      
+                      // LOW: Hardcoded credentials
+                      if (preg_match('/(password|pwd|secret)\s*=\s*["\']/', $line)) {
+                          $results['low'][] = "ℹ️ BAJO: Credenciales hardcoded en $loc";
+                      }
+                      
+                      // INFO: Deprecated functions
+                      if (preg_match('/(mysql_|eregi|split\(|each\()/', $line)) {
+                          $results['info'][] = "📋 INFO: Funciones deprecated en $loc";
+                      }
+                  }
+
+                  // Checks that apply to the whole file, not specific lines (Reported on line 1 or 0)
+                  
+                  // MEDIUM: Missing MOODLE_INTERNAL
+                  if (!$hasMoodleInternal) {
+                      $results['medium'][] = "⚠️ MEDIO: MOODLE_INTERNAL faltante en $path (Global)";
+                  }
+                  
+                  // MEDIUM: Missing require_login (Conditional logic kept from original)
+                  if (preg_match('/\$USER|\$COURSE/', $content) && !$hasRequireLogin) {
+                      $results['medium'][] = "⚠️ MEDIO: require_login() faltante en $path (Global)";
+                  }
+              }
+              
+              $results['total_issues'] = count($results['critical']) + count($results['high']) + 
+                                       count($results['medium']) + count($results['low']) + 
+                                       count($results['info']);
+              
+              return $results;
+          }
+          
+          // Execute complete analysis
+          echo "🔍 Iniciando análisis completo de seguridad...\n";
+          $analysis = analyze_complete_security('.');
+          
+          echo "📊 RESUMEN EJECUTIVO\n";
+          echo "===================\n";
+          echo "📁 Archivos escaneados: " . $analysis['files_scanned'] . "\n";
+          echo "🚨 Críticos: " . count($analysis['critical']) . "\n";
+          echo "⚠️ Altos: " . count($analysis['high']) . "\n";
+          echo "⚠️ Medios: " . count($analysis['medium']) . "\n";
+          echo "ℹ️ Bajos: " . count($analysis['low']) . "\n";
+          echo "📋 Info: " . count($analysis['info']) . "\n";
+          echo "📊 TOTAL: " . $analysis['total_issues'] . " problemas\n";
+          echo "===================\n\n";
+          
+          // Display all issues
+          foreach (['critical' => 'CRÍTICOS', 'high' => 'ALTOS', 'medium' => 'MEDIOS', 
+                    'low' => 'BAJOS', 'info' => 'INFORMACIÓN'] as $level => $label) {
+              if (!empty($analysis[$level])) {
+                  echo "🔍 PROBLEMAS $label (" . count($analysis[$level]) . "):\n";
+                  foreach ($analysis[$level] as $issue) {
+                      echo "  $issue\n";
+                  }
+                  echo "\n";
+              }
+          }
+          
+          if ($analysis['total_issues'] == 0) {
+              echo "🎉 ¡EXCELENTE! No se encontraron problemas de seguridad.\n";
+          }
+          
+          // Save detailed report
+          file_put_contents('reports/security-detailed-report.txt', 
+              "ANÁLISIS COMPLETO DE SEGURIDAD\n" .
+              "==============================\n\n" .
+              "Archivos analizados: " . $analysis['files_scanned'] . "\n" .
+              "Total problemas: " . $analysis['total_issues'] . "\n\n" .
+              "DESGLOSE POR SEVERIDAD:\n" .
+              "- Críticos: " . count($analysis['critical']) . "\n" .
+              "- Altos: " . count($analysis['high']) . "\n" .
+              "- Medios: " . count($analysis['medium']) . "\n" .
+              "- Bajos: " . count($analysis['low']) . "\n" .
+              "- Informativos: " . count($analysis['info']) . "\n\n" .
+              implode("\n", array_merge($analysis['critical'], $analysis['high'], 
+                                      $analysis['medium'], $analysis['low'], $analysis['info']))
+          );
+          
+          echo "✅ Análisis de seguridad completado - Reporte guardado\n";
+          EOF
+          
+          php security_scanner.php | tee -a reports/security-analysis.txt
